@@ -85,9 +85,12 @@ _LLM_SENSITIVE_PATTERNS = (
 
 def _should_log_llm_content_preview(config: Optional[Config] = None) -> bool:
     """Allow LLM content preview only under explicit debug switches."""
-    if is_sensitive_log_preview_enabled():
-        return True
-    runtime_config = config or get_config()
+    if config is None:
+        if is_sensitive_log_preview_enabled():
+            return True
+        runtime_config = get_config()
+    else:
+        runtime_config = config
     return bool(
         getattr(runtime_config, "debug", False)
         or str(getattr(runtime_config, "log_level", "INFO") or "INFO").upper() == "DEBUG"

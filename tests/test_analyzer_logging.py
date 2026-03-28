@@ -85,7 +85,13 @@ def test_should_log_llm_content_preview_accepts_existing_debug_switches():
 
     set_sensitive_log_preview_enabled(True)
 
-    assert _should_log_llm_content_preview(_make_config())
+    assert _should_log_llm_content_preview() is True
+
+
+def test_should_log_llm_content_preview_recomputes_from_current_runtime_config():
+    set_sensitive_log_preview_enabled(True)
+
+    assert not _should_log_llm_content_preview(_make_config())
 
 
 def test_setup_logging_only_enables_sensitive_preview_for_explicit_debug_levels(tmp_path):
