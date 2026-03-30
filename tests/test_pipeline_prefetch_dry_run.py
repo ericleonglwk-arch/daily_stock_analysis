@@ -72,7 +72,8 @@ class TestPipelinePrefetchBehavior(unittest.TestCase):
             ]
         )
 
-        with patch("src.core.pipeline.time.monotonic", side_effect=[0.0, 0.45, 0.45]):
+        # Extra monotonic value at index 0 for budget guard before prefetch
+        with patch("src.core.pipeline.time.monotonic", side_effect=[0.0, 0.0, 0.45, 0.45]):
             results = pipeline.run(
                 stock_codes=["000001", "000002", "000003"],
                 dry_run=False,
@@ -143,6 +144,22 @@ class TestPipelinePrefetchBehavior(unittest.TestCase):
         self.assertEqual([result.code for result in results], ["000001", "000002", "000003"])
         self.assertEqual(sleep_call_counts, [3])
 
+    def test_run_skips_prefetch_when_budget_already_exhausted(self):
+        """Prefetch should be skipped when soft-timeout budget is already exhausted."""
+        pipeline = self._build_pipeline(process_result=SimpleNamespace(code="000001"))
+
+        # deadline == monotonic value ⇒ remaining 0.0 <= grace 0.1 ⇒ budget exhausted
+        with patch("src.core.pipeline.time.monotonic", return_value=100.0):
+            pipeline.run(
+                stock_codes=["000001", "000002"],
+                dry_run=False,
+                send_notification=False,
+                soft_timeout_deadline=100.0,
+                soft_timeout_grace_seconds=0.1,
+            )
+
+        pipeline.fetcher_manager.prefetch_stock_names.assert_not_called()
+
     def test_run_includes_skipped_stock_list_in_saved_report(self):
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
         pipeline.max_workers = 1
@@ -162,7 +179,8 @@ class TestPipelinePrefetchBehavior(unittest.TestCase):
         )
         pipeline._latest_run_notices = []
 
-        with patch("src.core.pipeline.time.monotonic", side_effect=[0.0, 0.45, 0.45]):
+        # Extra monotonic value at index 0 for budget guard before prefetch
+        with patch("src.core.pipeline.time.monotonic", side_effect=[0.0, 0.0, 0.45, 0.45]):
             pipeline.run(
                 stock_codes=["000001", "000002", "000003"],
                 dry_run=False,
