@@ -314,6 +314,38 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         p1.search.assert_called_once()
         p2.search.assert_not_called()
 
+    def test_search_stock_news_normalizes_prefixed_a_share_code_for_context_match(self) -> None:
+        """SH/SZ-prefixed A-share codes should still match bare 6-digit news mentions."""
+        fresh = datetime.now().date().isoformat()
+        service = SearchService(
+            bocha_keys=["dummy_key"],
+            searxng_public_instances_enabled=False,
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+
+        p1 = SimpleNamespace(
+            is_available=True,
+            name="P1",
+            search=MagicMock(return_value=_response([_result("600519 发布分红公告", fresh)])),
+        )
+        p2 = SimpleNamespace(
+            is_available=True,
+            name="P2",
+            search=MagicMock(return_value=_response([_result("SH600519 English headline", fresh)])),
+        )
+        service._providers = [p1, p2]
+
+        resp = service.search_stock_news(
+            "SH600519",
+            "Moutai",
+            max_results=1,
+            focus_keywords=["A股 分红"],
+        )
+        self.assertEqual([r.title for r in resp.results], ["600519 发布分红公告"])
+        p1.search.assert_called_once()
+        p2.search.assert_not_called()
+
     def test_search_stock_news_brave_locale_matches_market_context(self) -> None:
         """Brave locale should follow Chinese-preferred vs US-stock contexts."""
         fresh_dt = datetime.now(timezone.utc).replace(microsecond=0)
@@ -321,6 +353,8 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
 
         for stock_code, stock_name, expected_lang, expected_country, title, description in (
             ("600519", "贵州茅台", "zh-hans", "CN", "贵州茅台中文资讯", "贵州茅台中文摘要"),
+            ("600519.SH", "Moutai", "zh-hans", "CN", "贵州茅台中文资讯", "贵州茅台中文摘要"),
+            ("SH600519", "Moutai", "zh-hans", "CN", "贵州茅台中文资讯", "贵州茅台中文摘要"),
             ("AAPL", "Apple", "en", "US", "Apple earnings beat", "English summary"),
         ):
             with self.subTest(stock_code=stock_code):

@@ -38,6 +38,7 @@ from src.config import (
     normalize_news_strategy_profile,
     resolve_news_window_days,
 )
+from src.services.stock_code_utils import normalize_code
 
 logger = logging.getLogger(__name__)
 
@@ -2072,9 +2073,17 @@ class SearchService:
             return True
         if cls._contains_chinese_text(stock_name):
             return True
-        # Positive A-stock identification: 6-digit numeric codes (e.g. 600519)
-        code = (stock_code or "").strip()
+        # Positive A-stock identification: 6-digit mainland symbols, including
+        # canonical/prefixed forms such as 600519.SH / SH600519.
+        code = cls._normalize_stock_code(stock_code)
         return code.isdigit() and len(code) == 6
+
+    @staticmethod
+    def _normalize_stock_code(stock_code: str) -> str:
+        """Normalize common exchange-decorated codes into a stable comparison key."""
+        raw_code = (stock_code or "").strip()
+        normalized = normalize_code(raw_code)
+        return (normalized or raw_code).strip().upper()
 
     @classmethod
     def _is_chinese_news_result(cls, item: SearchResult) -> bool:
@@ -2103,12 +2112,21 @@ class SearchService:
         if not raw_code:
             return False
 
-        code_variants = {raw_code.lower()}
-        base_code = raw_code.split(".", 1)[0].lower()
-        if base_code:
-            code_variants.add(base_code)
-            if base_code.isdigit() and len(base_code) == 6:
-                code_variants.update({f"sh{base_code}", f"sz{base_code}"})
+        normalized_code = cls._normalize_stock_code(raw_code).lower()
+        code_variants = {raw_code.lower(), normalized_code}
+        if normalized_code.isdigit():
+            if len(normalized_code) == 6:
+                code_variants.update(
+                    {
+                        f"sh{normalized_code}",
+                        f"sz{normalized_code}",
+                        f"{normalized_code}.sh",
+                        f"{normalized_code}.sz",
+                        f"{normalized_code}.ss",
+                    }
+                )
+            elif len(normalized_code) == 5:
+                code_variants.update({f"hk{normalized_code}", f"{normalized_code}.hk"})
 
         for variant in code_variants:
             if re.search(rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])", lower_text):
