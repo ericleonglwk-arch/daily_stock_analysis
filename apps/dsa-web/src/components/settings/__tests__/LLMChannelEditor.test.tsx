@@ -103,6 +103,78 @@ describe('LLMChannelEditor', () => {
     expect(within(visionModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
   });
 
+  it('checks protocol-prefixed selected model when discovery returns bare id', async () => {
+    discoverLLMChannelModels.mockResolvedValue({
+      success: true,
+      message: 'LLM channel model discovery succeeded',
+      error: null,
+      resolvedProtocol: 'openai',
+      models: ['MiniMax-M1'],
+      latencyMs: 80,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'dashscope' },
+          { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
+          { key: 'LLM_DASHSCOPE_BASE_URL', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+          { key: 'LLM_DASHSCOPE_ENABLED', value: 'true' },
+          { key: 'LLM_DASHSCOPE_API_KEY', value: 'sk-test' },
+          { key: 'LLM_DASHSCOPE_MODELS', value: 'openai/MiniMax-M1' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /通义千问/i }));
+    fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
+
+    const checkbox = await screen.findByLabelText('MiniMax-M1');
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(checkbox);
+    await waitFor(() => {
+      expect(screen.getByLabelText('手动模型（逗号分隔）')).toHaveValue('');
+    });
+  });
+
+  it('does not treat unknown-prefixed selected model as equivalent to bare discovered id', async () => {
+    discoverLLMChannelModels.mockResolvedValue({
+      success: true,
+      message: 'LLM channel model discovery succeeded',
+      error: null,
+      resolvedProtocol: 'openai',
+      models: ['MiniMax-M1'],
+      latencyMs: 80,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'dashscope' },
+          { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
+          { key: 'LLM_DASHSCOPE_BASE_URL', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+          { key: 'LLM_DASHSCOPE_ENABLED', value: 'true' },
+          { key: 'LLM_DASHSCOPE_API_KEY', value: 'sk-test' },
+          { key: 'LLM_DASHSCOPE_MODELS', value: 'minimax/MiniMax-M1' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /通义千问/i }));
+    fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
+
+    const checkbox = await screen.findByLabelText('MiniMax-M1');
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByLabelText('手动模型（逗号分隔）')).toHaveValue('minimax/MiniMax-M1');
+  });
+
   it('discovers models and writes selected values back to channel config', async () => {
     discoverLLMChannelModels.mockResolvedValue({
       success: true,
@@ -265,7 +337,7 @@ describe('LLMChannelEditor', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Dashscope 官方/i }));
+    fireEvent.click(screen.getByRole('button', { name: /通义千问/i }));
     fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
 
     const dashModelCheckbox = await screen.findByLabelText('dashscope-plus');
@@ -286,5 +358,52 @@ describe('LLMChannelEditor', () => {
       expect(screen.getByLabelText('手动模型（逗号分隔）')).toHaveValue('dash-old,dashscope-plus');
     });
     expect(screen.queryByLabelText('stale-openai')).not.toBeInTheDocument();
+  });
+
+  it('does not apply stale discovery response after inline channel edit', async () => {
+    let resolvePendingFirst!: (value: unknown) => void;
+    const pendingFirst = new Promise((resolve) => {
+      resolvePendingFirst = resolve;
+    });
+
+    discoverLLMChannelModels.mockImplementationOnce(() => pendingFirst);
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'dashscope' },
+          { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
+          { key: 'LLM_DASHSCOPE_BASE_URL', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+          { key: 'LLM_DASHSCOPE_ENABLED', value: 'true' },
+          { key: 'LLM_DASHSCOPE_API_KEY', value: 'dash-key' },
+          { key: 'LLM_DASHSCOPE_MODELS', value: 'qwen-old' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Dashscope/i }));
+    fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
+
+    const baseUrlInput = screen.getByLabelText('Base URL');
+    fireEvent.change(baseUrlInput, {
+      target: { value: 'https://dashscope.aliyuncs.com/compatible-mode/v2' },
+    });
+
+    resolvePendingFirst({
+      success: true,
+      message: 'LLM channel model discovery succeeded',
+      error: null,
+      resolvedProtocol: 'openai',
+      models: ['stale-openai'],
+      latencyMs: 20,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('模型（逗号分隔）')).toHaveValue('qwen-old');
+      expect(screen.queryByLabelText('stale-openai')).not.toBeInTheDocument();
+    });
   });
 });

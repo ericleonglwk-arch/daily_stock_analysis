@@ -205,7 +205,9 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   const displayName = preset?.label || channel.name;
   const selectedModels = splitModels(channel.models);
   const discoveredModels = discoveryState?.models || [];
-  const manualOnlyModels = selectedModels.filter((model) => !discoveredModels.includes(model));
+  const manualOnlyModels = selectedModels.filter(
+    (model) => !discoveredModels.some((discoveredModel) => areModelsEquivalent(model, discoveredModel, channel.protocol)),
+  );
   const modelCount = selectedModels.length;
   const hasKey = channel.apiKey.length > 0;
   const statusVariant = testState?.status === 'success'
@@ -381,9 +383,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                     <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
                       <input
                         type="checkbox"
-                        checked={selectedModels.includes(model)}
+                        checked={selectedModels.some((selectedModel) => (
+                          areModelsEquivalent(selectedModel, model, channel.protocol)
+                        ))}
                         disabled={busy}
-                        onChange={() => onUpdate(index, 'models', toggleModelSelection(channel.models, model))}
+                        onChange={() => onUpdate(index, 'models', toggleModelSelection(channel.models, model, channel.protocol))}
                         className="settings-input-checkbox h-4 w-4 rounded border-border/70 bg-base"
                       />
                       <span>{model}</span>
@@ -504,10 +508,57 @@ function splitModels(models: string): string[] {
     .filter(Boolean);
 }
 
-function toggleModelSelection(models: string, targetModel: string): string {
+interface ParsedModelRef {
+  name: string;
+  provider: string;
+  hasProvider: boolean;
+}
+
+function parseModelRef(model: string): ParsedModelRef {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return { name: '', provider: '', hasProvider: false };
+  }
+
+  const delimiterIndex = trimmed.indexOf('/');
+  if (delimiterIndex < 0) {
+    return { name: trimmed.toLowerCase(), provider: '', hasProvider: false };
+  }
+
+  const rawProvider = trimmed.slice(0, delimiterIndex).trim();
+  const name = trimmed.slice(delimiterIndex + 1).trim();
+  if (!rawProvider || !name) {
+    return { name: '', provider: '', hasProvider: false };
+  }
+
+  const lowerProvider = rawProvider.toLowerCase();
+  return {
+    name: name.toLowerCase(),
+    provider: PROTOCOL_ALIASES[lowerProvider] || lowerProvider,
+    hasProvider: true,
+  };
+}
+
+function getModelComparisonKey(model: string, protocol: ChannelProtocol): string {
+  const normalizedModel = normalizeModelForRuntime(model, protocol).trim();
+  const parsed = parseModelRef(normalizedModel);
+  if (!parsed.name) {
+    return '';
+  }
+  return `${parsed.provider}/${parsed.name}`;
+}
+
+function areModelsEquivalent(a: string, b: string, protocol: ChannelProtocol): boolean {
+  const left = getModelComparisonKey(a, protocol);
+  const right = getModelComparisonKey(b, protocol);
+  return left !== '' && left === right;
+}
+
+function toggleModelSelection(models: string, targetModel: string, protocol: ChannelProtocol): string {
   const selectedModels = splitModels(models);
-  if (selectedModels.includes(targetModel)) {
-    return selectedModels.filter((model) => model !== targetModel).join(',');
+  const index = selectedModels.findIndex((model) => areModelsEquivalent(model, targetModel, protocol));
+  if (index >= 0) {
+    return selectedModels.filter((_, itemIndex) => itemIndex !== index).join(',');
   }
   return [...selectedModels, targetModel].join(',');
 }
@@ -832,6 +883,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         }
         const next = { ...previous };
         delete next[channel.id];
+        delete discoveryNonceRef.current[channel.id];
         return next;
       });
     }
