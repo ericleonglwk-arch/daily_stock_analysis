@@ -507,13 +507,18 @@ class TestOrchestratorModes(unittest.TestCase):
         """
         orch = self._make_orchestrator("full")
         orch.max_steps = 9
-        ctx = AgentContext(query="test", stock_code="600519")
-        chain = orch._build_agent_chain(ctx)
-        self.assertTrue(chain)
-        # All agents should have max_steps ≤ orchestrator's ceiling
-        self.assertTrue(all(agent.max_steps <= 9 for agent in chain))
-        # At least one agent should retain a lower per-agent default
-        self.assertTrue(any(agent.max_steps < 9 for agent in chain))
+        high_limit_chain = orch._build_agent_chain(AgentContext(query="test", stock_code="600519"))
+        self.assertEqual(
+            {agent.agent_name: agent.max_steps for agent in high_limit_chain},
+            {"technical": 6, "intel": 4, "risk": 4, "decision": 3},
+        )
+
+        orch.max_steps = 5
+        low_limit_chain = orch._build_agent_chain(AgentContext(query="test", stock_code="600519"))
+        self.assertEqual(
+            {agent.agent_name: agent.max_steps for agent in low_limit_chain},
+            {"technical": 5, "intel": 4, "risk": 4, "decision": 3},
+        )
 
     def test_build_context_from_dict(self):
         orch = self._make_orchestrator()
